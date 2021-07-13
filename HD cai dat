@@ -1,0 +1,179 @@
+Các bước cài đặt ELK Stack trên CentOS 7 như sau: #
+1. Cập nhật server và cài một số gói cần thiết:
+yum update -y && yum install -y vim wget curl
+
+2. Disabled SELinux #
+sed -i 's/\(^SELINUX=\).*/\SELINUX=disabled/' /etc/sysconfig/selinux
+
+3. Cài đặt Java #
+yum -y install java-openjdk-devel java-openjdk
+#Sau khi cài đặt xong, kiểm tra version bằng lệnh:
+java -version
+
+4. Cài đặt public key
+
+rpm --import https://artifacts.elastic.co/GPG-KEY-elasticsearch
+Thêm repo Elasticsearch version 7 để cài đặt
+
+vim /etc/yum.repos.d/elasticsearch.repo
+Thêm đoạn này vào:
+
+[elasticsearch-7.x]
+name=Elasticsearch repository for 7.x packages
+baseurl=https://artifacts.elastic.co/packages/7.x/yum
+gpgcheck=1
+gpgkey=https://artifacts.elastic.co/GPG-KEY-elasticsearch
+enabled=1
+autorefresh=1
+type=rpm-md
+Cài đặt Elaticsearch bằng lệnh sau:
+
+yum clean all && yum makecache && yum -y install elasticsearch
+Sau khi cài đặt xong, kiểm tra version bằng lệnh:
+
+rpm -qi elasticsearch
+Thiết lập dung lượng RAM để chạy Elasticsearch
+
+vim /etc/elasticsearch/jvm.options
+Cấu hình lại 2 tham số sau:
+
+-Xms256M
+-Xmx512M
+Với máy ảo hiện tại có 1GB Ram nên set 2 thông số trên, nếu server có nhiều ram hơn thì có thể tăng lên để chạy mượt mà hơn. Với môi trường test thì như vậy là ổn rồi.
+
+Bật khởi động khi start server
+
+systemctl enable elasticsearch.service
+Khởi động Elasticsearch
+
+systemctl start elasticsearch
+Kiểm tra trạng thái Elasticsearch
+
+systemctl status elasticsearch
+Kiểm tra Elasticsearch có phản hồi hay không bằng lệnh
+
+curl -X GET "localhost:9200"
+{
+
+“name” : “centos7”,
+
+“cluster_name” : “elasticsearch”,
+
+“cluster_uuid” : “0clFcT-PQ0qartjlE_Xblw”,
+
+“version” : {
+
+“number” : “7.3.1”,
+
+“build_flavor” : “default”,
+
+“build_type” : “rpm”,
+
+“build_hash” : “4749ba6”,
+
+“build_date” : “2019-08-19T20:19:25.651794Z”,
+
+“build_snapshot” : false,
+
+“lucene_version” : “8.1.0”,
+
+“minimum_wire_compatibility_version” : “6.8.0”,
+
+“minimum_index_compatibility_version” : “6.0.0-beta1”
+
+},
+
+“tagline” : “You Know, for Search”
+
+}
+II. Cài đặt và cấu hình giao diện quản trị Kibana 
+Kibana là giao diện quản trị log, giám sát thông số của hệ thống
+
+Cài đặt:
+
+yum -y install kibana
+Cấu hình Kibana để có thể truy cập:
+
+vim /etc/kibana/kibana.yml
+Một cách khác để có thể truy cấp thông qua Web là cài đặt Apache hoặc Nginx để kết nối từ port 80 đến port 5601 của Kibana
+
+Mở file và chỉnh sửa các thông số sau:
+
+server.port: 5601
+server.host: "0.0.0.0"
+elasticsearch.hosts: ["http://localhost:9200"]
+Lưu lại và thoát
+
+Bật khởi động và start dịch vụ Kibana:
+
+systemctl enable kibana
+systemctl start kibana
+Chờ vài giây để logstash chạy. Kiểm tra port 5601 nếu có tức là Kibana đang chạy
+
+netstat -plntu
+Mở port 5601 trên firewalld để có thể vào giao diện web
+
+firewall-cmd --zone=public --add-port=5601/tcp --permanent
+firewall-cmd –reload
+Mở trình duyệt web và nhập địa chỉ: http:http://{ip_server}:5601 để mở giao diện Kibana.
+
+III. Cài đặt và cấu hình Logtash #
+Cài đặt Logtash:
+
+yum -y install logstash
+Cấu hình logstash
+
+cp /etc/logstash/logstash-sample.conf /etc/logstash/conf.d/logstash.conf
+vim /etc/logstash/conf.d/logstash.conf
+Mở file và cấu hình như sau:
+
+input {
+  beats {
+    port => 5044
+  }
+}
+
+output {
+  elasticsearch {
+    hosts => ["http://localhost:9200"]
+    index => "%{[@metadata][beat]}-%{[@metadata][version]}-%{+YYYY.MM.dd}"
+    #user => "elastic"
+    #password => "changeme"
+  }
+}
+Tạo systemd cho logstash:
+sudo /usr/share/logstash/bin/system-install /etc/logstash/startup.options systemd
+
+Sau đó lưu lại và start logstash
+
+systemctl start logstash
+systemctl status logstash
+Chờ vài giây dể logstash chạy và kiểm tra port 5044 là port nhận log
+
+netstat -nutlp|grep 5044
+Cài đặt filebeat để bắt log và gửi log lên Logtash
+
+yum install -y filebeat
+Cấu hình gửi log lên Logstash
+
+vim /etc/filebeat/filebeat.yml
+Cấu hình như bên dưới
+
+filebeat.inputs:
+- type: log
+  enabled: true
+  paths:
+    - /var/log/message 
+    - /var/log/cron 
+
+output.logstash:
+  # IP của server Logstash, ở đây là localhost nếu gửi log đến server khác thì đặt đổi localhost thành IP server đó
+  hosts: ["localhost:5044"]
+Lưu lại và thoát
+
+Khởi động filebeat để gửi log đến Logstash
+
+systemctl start filebeat
+systemctl status filebeat
+“number” : “7.3.1”,sý
+“number” : “7.3.1”,
